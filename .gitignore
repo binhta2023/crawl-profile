@@ -1,0 +1,37 @@
+# === BÍ MẬT — TUYỆT ĐỐI KHÔNG COMMIT ===
+secrets.local.txt
+*.local.txt
+secrets*
+*.secret
+*.secret.*
+.env
+.env.*
+
+# Dữ liệu crawl (lớn, dữ liệu thật)
+data/
+
+# CSDL cục bộ
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+
+# Output nghiên cứu
+research_output.txt
+
+# Excel/CSV xuất ra
+*.xlsx
+*.csv
+
+# Cấu hình cục bộ
+.claude/settings.local.json
+.claude/projects/
