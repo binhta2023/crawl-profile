@@ -1,9 +1,9 @@
 """App khay hệ thống (system tray) cho crawler Hồ Sơ Năng Lực muasamcong.
 
-Chạy: python gui.py
+Chạy: python tray_profile.py
 
 - Thu nhỏ xuống khay khi bấm X.
-- Tự động chạy lúc 2:00 AM mỗi ngày.
+- Tự động quét định kỳ mỗi 2 giờ.
 - Chuột phải icon khay → Chạy ngay / Mở giao diện / Thoát.
 - Chỉ cho phép 1 instance (khóa cổng 50574).
 """
