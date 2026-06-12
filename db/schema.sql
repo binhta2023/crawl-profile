@@ -161,11 +161,12 @@ CREATE TABLE IF NOT EXISTS provinces (
 );
 
 -- ─── Tra cứu quận/huyện ───────────────────────────────────────────────
--- Seed từ cat-areas API (nếu lấy được); để trống nếu không lấy được
+-- Seed từ cat-areas areaType=2 khi crawl lần đầu (~4055 quận/huyện).
+-- province_code khớp officeDis; không dùng FK vì muasamcong dùng mã nội bộ.
 CREATE TABLE IF NOT EXISTS districts (
     code          TEXT PRIMARY KEY,   -- officeDis từ API, ví dụ "30589"
     name          TEXT NOT NULL,
-    province_code TEXT REFERENCES provinces(code)
+    province_code TEXT               -- officePro tương ứng
 );
 CREATE INDEX IF NOT EXISTS idx_districts_prov ON districts(province_code);
 

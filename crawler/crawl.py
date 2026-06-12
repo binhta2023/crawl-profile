@@ -76,11 +76,11 @@ def _run_source(source_key: str, headless: bool, verbose: bool,
             )
             page = ctx.new_page()
             try:
-                # Seed districts một lần từ browser session (no-op nếu đã có)
-                seed_districts(page, db, verbose=verbose)
                 scraper = ProfileScraper(source_key, info["url"],
                                          page, verbose=verbose)
                 stats = _crawl_incremental(source_key, scraper, db, verbose)
+                # Seed districts từ cat-areas data bắt được lúc load trang
+                seed_districts(scraper.cat_areas_data, db, verbose=verbose)
                 result.update(stats)
                 result["status"] = "done"
                 if verbose:

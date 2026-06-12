@@ -5,12 +5,13 @@ Districts: thử fetch cat-areas trong browser session khi crawl; bỏ qua nếu
 """
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from playwright.sync_api import Page
     from .db import ProfileDB
+
+# Tránh thử lại cat-areas nhiều lần trong cùng 1 tiến trình
+_districts_attempted: bool = False
 
 # 63 tỉnh/thành phố — mã chuẩn Bộ Nội vụ, khớp officePro trong API
 _PROVINCES = [
@@ -79,27 +80,14 @@ _PROVINCES = [
     ("96", "Cà Mau"),
 ]
 
-_FETCH_JS = r"""
-async ({url, body}) => {
-    try {
-        const r = await fetch(url, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
-            body: body,
-        });
-        return {status: r.status, text: await r.text()};
-    } catch(e) { return {status: 0, text: String(e)}; }
-}
-"""
-
-_CAT_AREAS_URLS = [
-    "https://muasamcong.mpi.gov.vn/o/egp-portal-contractors-approved/services/cat-areas",
-    "https://muasamcong.mpi.gov.vn/o/egp-portal-investors-approved/services/cat-areas",
-]
-
 
 def _parse_districts(data) -> list[dict]:
-    """Trích districts từ cat-areas response (nhiều format khác nhau)."""
+    """Trích districts từ cat-areas response.
+
+    Hỗ trợ 2 format:
+    - Flat list: [{code, name, parentCode, areaType}, ...] (areaType='2')
+    - Nested:    [{code, children: [{code, name}, ...]}, ...]
+    """
     items = []
     if isinstance(data, list):
         items = data
@@ -113,25 +101,27 @@ def _parse_districts(data) -> list[dict]:
     for item in items:
         if not isinstance(item, dict):
             continue
-        pcode = str(
-            item.get('code') or item.get('areaCode') or
-            item.get('provinceCode') or item.get('id') or ''
-        )
-        children = (item.get('children') or item.get('districts') or
-                    item.get('subAreas') or [])
+
+        # Flat format (areaType=2): code, name, parentCode
+        parent_code = str(item.get('parentCode') or item.get('provinceCode') or '')
+        if parent_code and parent_code != 'VN':
+            dcode = str(item.get('code') or item.get('areaCode') or item.get('id') or '')
+            dname = str(item.get('name') or item.get('areaName') or '')
+            if dcode and dname:
+                districts.append({'code': dcode, 'name': dname, 'province_code': parent_code})
+            continue
+
+        # Nested format: province item có children là districts
+        pcode = str(item.get('code') or item.get('areaCode') or item.get('id') or '')
+        children = item.get('children') or item.get('districts') or item.get('subAreas') or []
         for child in (children or []):
             if not isinstance(child, dict):
                 continue
-            dcode = str(
-                child.get('code') or child.get('areaCode') or
-                child.get('districtCode') or child.get('id') or ''
-            )
-            dname = str(
-                child.get('name') or child.get('areaName') or
-                child.get('districtName') or ''
-            )
+            dcode = str(child.get('code') or child.get('areaCode') or child.get('id') or '')
+            dname = str(child.get('name') or child.get('areaName') or '')
             if dcode and dname and pcode:
                 districts.append({'code': dcode, 'name': dname, 'province_code': pcode})
+
     return districts
 
 
@@ -158,40 +148,29 @@ def seed_provinces(db: "ProfileDB", verbose: bool = True) -> int:
     return len(rows)
 
 
-def seed_districts(page: "Page", db: "ProfileDB", verbose: bool = True) -> int:
-    """Thử fetch cat-areas từ browser session để lấy quận/huyện.
+def seed_districts(data, db: "ProfileDB", verbose: bool = True) -> int:
+    """Insert quận/huyện từ cat-areas data (đã bắt được lúc scraper load trang).
 
-    Trả về số district đã insert (0 nếu không lấy được).
+    data: response JSON từ cat-areas (list hoặc dict), hoặc None nếu không bắt được.
+    Chỉ insert 1 lần — no-op nếu bảng đã có dữ liệu.
     """
+    global _districts_attempted
     from sqlalchemy import text
     from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    if _districts_attempted or data is None:
+        return 0
 
     with db.engine.connect() as conn:
         n = conn.execute(text("SELECT COUNT(*) FROM districts")).scalar()
     if n and n > 0:
+        _districts_attempted = True
         return n
 
-    data = None
-    for url in _CAT_AREAS_URLS:
-        try:
-            res = page.evaluate(_FETCH_JS, {"url": url, "body": "{}"})
-            if res.get("status") == 200 and res.get("text"):
-                data = json.loads(res["text"])
-                if isinstance(data, (list, dict)):
-                    break
-        except Exception:
-            continue
-
-    if not data:
-        if verbose:
-            print("  ⚠ Không lấy được cat-areas — bỏ qua districts", flush=True)
-        return 0
+    _districts_attempted = True
 
     districts = _parse_districts(data)
     if not districts:
-        if verbose:
-            print(f"  ⚠ cat-areas trả về data nhưng parse được 0 district "
-                  f"(type={type(data).__name__}, preview={str(data)[:120]})", flush=True)
         return 0
 
     with db.engine.begin() as conn:

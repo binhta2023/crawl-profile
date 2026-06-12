@@ -406,8 +406,24 @@ class ProfileScraper:
         self._page.wait_for_timeout(2000)
         return True
 
+    def _fetch_districts(self) -> None:
+        """Gọi cat-areas areaType=2 để lấy toàn bộ quận/huyện (dùng session đang mở)."""
+        cat_url = next(
+            (c['url'] for c in self._captured if 'cat-areas' in c['url']), None
+        )
+        if not cat_url:
+            return
+        try:
+            data = self._call_api(cat_url, '{"areaType":"2"}')
+            if isinstance(data, list) and data:
+                self.cat_areas_data = data
+                self._log(f"  ✓ cat-areas: {len(data)} quận/huyện")
+        except Exception:
+            pass
+
     def _setup(self) -> tuple[str | None, str | None]:
         """Mở trang, bắt requests, trả về (api_url, original_body) hoặc (None, None)."""
+        self.cat_areas_data = None
         self._page.on('request', self._on_request)
         try:
             self._page.goto(self.url, wait_until='networkidle',
@@ -439,6 +455,7 @@ class ProfileScraper:
                 self._log(f"  ✓ Endpoint: .../{cap['url'].split('/')[-1]} "
                           f"— {total_elem} bản ghi, {total_pages} trang")
                 self._page0_data = data
+                self._fetch_districts()
                 return cap['url'], cap['post_data']
         return None, None
 
