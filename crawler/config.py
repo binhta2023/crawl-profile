@@ -4,9 +4,33 @@ from __future__ import annotations
 import os
 import sys
 import threading
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 HOST = "https://muasamcong.mpi.gov.vn"
+
+# ── Giờ Việt Nam (UTC+7, không có DST) ───────────────────────────────────────
+VN_TZ = timezone(timedelta(hours=7))
+
+
+def now_vn() -> datetime:
+    """Thời điểm hiện tại theo giờ Việt Nam (aware)."""
+    return datetime.now(VN_TZ)
+
+
+def to_vn(dt: "datetime | None") -> "datetime | None":
+    """Đổi 1 datetime sang giờ VN. Naive được coi là UTC (cách DB lưu)."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(VN_TZ)
+
+
+def fmt_vn(dt: "datetime | None", fmt: str = "%d/%m %H:%M") -> str:
+    """Format datetime theo giờ VN; trả '—' nếu None."""
+    d = to_vn(dt)
+    return d.strftime(fmt) if d else "—"
 
 # 5 nguồn cần crawl mỗi ngày
 SOURCES: dict[str, dict] = {

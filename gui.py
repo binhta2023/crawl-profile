@@ -16,7 +16,7 @@ import sys
 import threading
 import tkinter as tk
 import winreg
-from datetime import datetime, date, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from tkinter import ttk, scrolledtext, messagebox
 
@@ -32,7 +32,7 @@ PYEXE  = sys.executable
 RUN    = str(BASE / "run.py")
 
 _LOCK_PORT  = 50574
-_SCHED_HOUR = 2    # chạy lúc 2h sáng
+_SCHED_INTERVAL_HOURS = 2    # quét định kỳ mỗi 2 giờ
 _APP_NAME   = "CrawlProfile"
 _APP_TITLE  = "Crawler Hồ Sơ Năng Lực — muasamcong"
 
@@ -128,13 +128,9 @@ def _set_startup(enable: bool):
 
 # ── Scheduler ─────────────────────────────────────────────────────────────────
 
-def _seconds_until_next(hour: int) -> int:
-    """Số giây đến lần chạy kế tiếp vào giờ `hour`."""
-    now = datetime.now()
-    target = now.replace(hour=hour, minute=0, second=0, microsecond=0)
-    if target <= now:
-        target += timedelta(days=1)
-    return int((target - now).total_seconds())
+def _sched_interval() -> timedelta:
+    """Khoảng cách giữa 2 lần quét định kỳ."""
+    return timedelta(hours=_SCHED_INTERVAL_HOURS)
 
 
 # ── App chính ─────────────────────────────────────────────────────────────────
@@ -144,7 +140,7 @@ class App:
         self.root = root
         self.proc: subprocess.Popen | None = None
         self.q: queue.Queue = queue.Queue()
-        self._last_run_date: date | None = None
+        self._next_run_at: datetime = datetime.now() + _sched_interval()
         self._tray_notified = False
         self.tray = None
 
@@ -341,31 +337,31 @@ class App:
         except Exception:
             pass
 
-    # ── Scheduler (2h sáng) ───────────────────────────────────────────────────
+    # ── Scheduler (định kỳ mỗi N giờ) ─────────────────────────────────────────
 
     def _scheduler_loop(self):
         import time
         while True:
             time.sleep(30)
-            now = datetime.now()
-            today = now.date()
-            if (now.hour == _SCHED_HOUR and now.minute < 5
-                    and self._last_run_date != today):
-                self._last_run_date = today
+            if datetime.now() >= self._next_run_at:
+                # Đặt lịch lần kế tiếp ngay để tránh chạy chồng / dồn nhiều lần
+                self._next_run_at = datetime.now() + _sched_interval()
                 self.root.after(0, self._auto_run)
 
     def _auto_run(self):
-        self._append(f"\n[Tự động chạy lúc {_SCHED_HOUR:02d}:00]\n")
+        if self.proc:
+            self._append("\n[Bỏ qua lần quét định kỳ — crawler đang chạy]\n")
+            return
+        self._append(f"\n[Tự động quét định kỳ — mỗi {_SCHED_INTERVAL_HOURS}h]\n")
         self.run_now()
 
     def _tick_next_run(self):
         """Cập nhật nhãn đếm ngược đến lần chạy tiếp theo (mỗi giây)."""
-        secs = _seconds_until_next(_SCHED_HOUR)
+        secs = max(0, int((self._next_run_at - datetime.now()).total_seconds()))
         h, rem = divmod(secs, 3600)
         m, s = divmod(rem, 60)
-        next_dt = datetime.now() + timedelta(seconds=secs)
         self.lbl_next.config(
-            text=f"Lần chạy tiếp: {next_dt.strftime('%d/%m %H:%M')}  "
+            text=f"Lần chạy tiếp: {self._next_run_at.strftime('%d/%m %H:%M')}  "
                  f"(còn {h:02d}:{m:02d}:{s:02d})")
         self.root.after(1000, self._tick_next_run)
 
@@ -381,7 +377,7 @@ class App:
                     total = db.count(key)
                     if log:
                         ts = log.get("finished_at") or log.get("started_at")
-                        ts_str = ts.strftime("%d/%m %H:%M") if ts else "—"
+                        ts_str = C.fmt_vn(ts)
                         delta = f"+{log.get('n_new',0)} / ~{log.get('n_updated',0)}"
                     else:
                         ts_str, delta = "—", "—"

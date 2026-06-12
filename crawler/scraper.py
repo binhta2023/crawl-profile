@@ -232,7 +232,7 @@ class ProfileScraper:
 
     def _log(self, *a):
         if self.verbose:
-            ts = __import__('datetime').datetime.now().strftime('%H:%M:%S')
+            ts = C.now_vn().strftime('%H:%M:%S')
             print(f"[{ts}][{self.source_key}]", *a, flush=True)
 
     def _on_request(self, req):
