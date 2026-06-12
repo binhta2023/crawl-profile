@@ -42,9 +42,23 @@ _APP_TITLE  = "Crawler Hồ Sơ Năng Lực — muasamcong"
 def _tray_image() -> "Image.Image":
     img = Image.new("RGBA", (64, 64), (25, 95, 170, 255))   # xanh dương
     d = ImageDraw.Draw(img)
-    d.rectangle([6, 6, 58, 58], outline=(255, 255, 255, 200), width=3)
+    d.rectangle([4, 4, 60, 60], outline=(255, 255, 255, 180), width=2)
     try:
-        d.text((16, 18), "PR", fill=(255, 255, 255, 255))
+        from PIL import ImageFont
+        font = None
+        for name in ("arialbd.ttf", "arial.ttf", "segoeui.ttf", "DejaVuSans-Bold.ttf"):
+            try:
+                font = ImageFont.truetype(name, 38)
+                break
+            except Exception:
+                pass
+        if font:
+            bbox = d.textbbox((0, 0), "P", font=font)
+            x = (64 - (bbox[2] - bbox[0])) // 2 - bbox[0]
+            y = (64 - (bbox[3] - bbox[1])) // 2 - bbox[1]
+            d.text((x, y), "P", fill=(255, 255, 255, 255), font=font)
+        else:
+            d.text((22, 20), "P", fill=(255, 255, 255, 255))
     except Exception:
         pass
     return img
@@ -442,6 +456,10 @@ def main():
     app = App(root)
     app._lock = lock
     threading.Thread(target=_lock_listener, args=(lock, app), daemon=True).start()
+
+    # Ẩn cửa sổ ngay — chỉ hiện icon tray, mở cửa sổ khi cần
+    root.withdraw()
+
     root.mainloop()
 
 
