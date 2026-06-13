@@ -232,6 +232,8 @@ class ProfileScraper:
 
     PAGE_SIZE = 20      # API muasamcong giới hạn cứng pageSize tối đa = 20
     MAX_PAGES = 20000   # trần an toàn (~400.000 records ở pageSize=20)
+    MAX_RETRIES = 5     # số lần thử lại mỗi lượt gọi API khi lỗi mạng
+    RETRY_BASE_DELAY = 3.0   # giây, backoff luỹ thừa: 3,6,12,24... (tối đa 60)
 
     def __init__(self, source_key: str, url: str, page: Page, verbose: bool = True):
         self.source_key = source_key
@@ -272,21 +274,40 @@ class ProfileScraper:
         except Exception:
             return None
 
-    def _call_api(self, url: str, body_str: str) -> dict | list | None:
-        """Gọi API in-page; thử không token trước, nếu 400 thử với reCAPTCHA."""
-        # Lần 1: không token
+    def _sleep_backoff(self, attempt: int) -> None:
+        """Nghỉ theo backoff luỹ thừa (tối đa 60s)."""
+        time.sleep(min(self.RETRY_BASE_DELAY * (2 ** attempt), 60))
+
+    def _reconnect(self) -> bool:
+        """Tải lại trang để khôi phục session/origin sau lỗi mạng (mất kết nối)."""
+        for i in range(3):
+            try:
+                self._page.goto(self.url, wait_until='domcontentloaded',
+                                timeout=C.NAV_TIMEOUT_MS)
+                self._page.wait_for_timeout(1500)
+                self._log("  ↻ Đã reconnect lại trang")
+                return True
+            except Exception as e:
+                self._log(f"  ⚠ reconnect lỗi ({i+1}/3): {str(e)[:60]}")
+                self._sleep_backoff(i)
+        return False
+
+    def _fetch_once(self, url: str, body_str: str):
+        """Gọi fetch 1 lần. Trả (data|None, status). status=-1 nếu evaluate ném lỗi."""
         try:
             res = self._page.evaluate(_FETCH_JS, {'url': url, 'bodyStr': body_str})
-            if res['status'] == 200:
-                return json.loads(res['text'])
-            need_token = res['status'] in (400, 401, 403)
         except Exception:
-            need_token = True
+            return None, -1
+        status = res.get('status')
+        if status == 200:
+            try:
+                return json.loads(res['text']), 200
+            except Exception:
+                return None, 200
+        return None, status
 
-        if not need_token:
-            return None
-
-        # Lần 2: với reCAPTCHA
+    def _call_with_token(self, url: str, body_str: str):
+        """Gọi lại với reCAPTCHA token (khi API trả 400/401/403)."""
         if self._sitekey is None:
             self._sitekey = self._read_sitekey()
         if not self._sitekey:
@@ -299,6 +320,33 @@ class ProfileScraper:
                 return json.loads(res['text'])
         except Exception:
             pass
+        return None
+
+    def _call_api(self, url: str, body_str: str) -> dict | list | None:
+        """Gọi API in-page có retry + tự reconnect khi lỗi mạng.
+
+        - status 200            → trả data
+        - status 400/401/403    → thử lại với reCAPTCHA token
+        - status -1 (page lỗi) / 0 (mạng) / 5xx → reconnect + thử lại (backoff)
+        """
+        for attempt in range(self.MAX_RETRIES):
+            data, status = self._fetch_once(url, body_str)
+            if status == 200 and data is not None:
+                return data
+
+            if status in (400, 401, 403):
+                tok = self._call_with_token(url, body_str)
+                if tok is not None:
+                    return tok
+                # token cũng fail → coi như tạm thời, thử lại
+
+            if attempt < self.MAX_RETRIES - 1:
+                self._log(f"  ⚠ API status={status}, thử lại "
+                          f"{attempt + 2}/{self.MAX_RETRIES} (backoff)…")
+                self._sleep_backoff(attempt)
+                # mất kết nối / context trang hỏng → tải lại trang
+                if status in (-1, 0):
+                    self._reconnect()
         return None
 
 
@@ -437,11 +485,19 @@ class ProfileScraper:
         """Mở trang, bắt requests, trả về (api_url, original_body) hoặc (None, None)."""
         self.cat_areas_data = None
         self._page.on('request', self._on_request)
-        try:
-            self._page.goto(self.url, wait_until='networkidle',
-                            timeout=C.NAV_TIMEOUT_MS)
-        except PWTimeout:
-            self._log("⚠ Timeout tải trang, tiếp tục...")
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                self._page.goto(self.url, wait_until='networkidle',
+                                timeout=C.NAV_TIMEOUT_MS)
+                break
+            except PWTimeout:
+                self._log("⚠ Timeout tải trang, tiếp tục...")
+                break   # timeout: trang có thể đã load đủ để dùng
+            except Exception as e:
+                self._log(f"⚠ Lỗi tải trang ({attempt + 1}/{self.MAX_RETRIES}): "
+                          f"{str(e)[:70]}")
+                if attempt < self.MAX_RETRIES - 1:
+                    self._sleep_backoff(attempt)
         self._page.wait_for_timeout(2000)
 
         # Click "Bộ lọc → Áp dụng" để trigger data API (4/5 nguồn cần thao tác này)
@@ -510,7 +566,12 @@ class ProfileScraper:
             body_n = _set_page_num(original_body, pn, self.PAGE_SIZE)
             data_n = self._call_api(api_url, body_n)
             if data_n is None:
-                self._log(f"  ✗ Trang {pn + 1} lỗi, dừng")
+                # _call_api đã retry+reconnect nhiều lần; thử reconnect 1 lần cuối
+                self._log(f"  ↻ Trang {pn + 1} fail — reconnect lần cuối rồi thử lại")
+                if self._reconnect():
+                    data_n = self._call_api(api_url, body_n)
+            if data_n is None:
+                self._log(f"  ✗ Trang {pn + 1} vẫn lỗi sau reconnect, dừng")
                 return
             recs = _get_records(data_n)
             if not recs:
