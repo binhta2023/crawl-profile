@@ -149,6 +149,17 @@ def _arr_to_dt(v):
     return v
 
 
+def _strip_nul(v):
+    """Bỏ ký tự NUL (0x00) khỏi mọi chuỗi — PostgreSQL TEXT/JSONB không lưu được."""
+    if isinstance(v, str):
+        return v.replace('\x00', '') if '\x00' in v else v
+    if isinstance(v, dict):
+        return {k: _strip_nul(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_strip_nul(x) for x in v]
+    return v
+
+
 def _hash(record: dict) -> str:
     """MD5 của JSON record (bỏ _record_key helper field)."""
     clean = {k: v for k, v in record.items() if k != '_record_key'}
@@ -296,6 +307,7 @@ class ProfileDB:
 
     def upsert_record(self, source: str, raw: dict) -> str:
         """Insert hoặc update 1 record. Trả về 'new'|'updated'|'unchanged'."""
+        raw = _strip_nul(raw)
         record_key = raw.get('_record_key', '')
         new_hash = _hash(raw)
         existing_hash = self.get_hash(source, record_key)
@@ -332,6 +344,7 @@ class ProfileDB:
         if not page_records:
             return 0, 0, 0
 
+        page_records = [_strip_nul(r) for r in page_records]
         keys = [r.get('_record_key', '') for r in page_records]
         existing = self.get_hashes_for_page(source, keys)
 
