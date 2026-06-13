@@ -162,20 +162,32 @@ def _get_records(data) -> list[dict]:
     return []
 
 
-def _set_page_num(body_str: str, page_num: int) -> str:
-    """Đặt lại pageNumber trong body JSON, giữ nguyên pageSize từ body gốc."""
+def _set_page_num(body_str: str, page_num: int, page_size: int | None = None) -> str:
+    """Đặt lại pageNumber trong body JSON; nếu có page_size thì ép luôn pageSize.
+
+    API muasamcong giới hạn cứng pageSize tối đa = 20, nên dùng 20 để giảm
+    số trang (mặc định body của trang web chỉ là 10).
+    """
+    def _apply_size(obj):
+        if page_size is not None:
+            for sk in ('pageSize', 'pagesize', 'size', 'limit'):
+                if sk in obj:
+                    obj[sk] = page_size
+                    break
     try:
         data = json.loads(body_str)
         if isinstance(data, list) and data and isinstance(data[0], dict):
             obj = data[0]
             if 'pageNumber' in obj:
                 obj['pageNumber'] = page_num
+            _apply_size(obj)
             return json.dumps(data, ensure_ascii=False)
         if isinstance(data, dict):
             for k in ('pageNumber', 'pageNum', 'page', 'currentPage', 'pageNo', 'from'):
                 if k in data:
                     data[k] = page_num
                     break
+            _apply_size(data)
             return json.dumps(data, ensure_ascii=False)
     except Exception:
         pass
@@ -218,8 +230,8 @@ class ProfileScraper:
     Dùng: scraper = ProfileScraper("contractors", url, page); records = scraper.crawl()
     """
 
-    PAGE_SIZE = 50
-    MAX_PAGES = 5000   # giới hạn an toàn (~250.000 records)
+    PAGE_SIZE = 20      # API muasamcong giới hạn cứng pageSize tối đa = 20
+    MAX_PAGES = 20000   # trần an toàn (~400.000 records ở pageSize=20)
 
     def __init__(self, source_key: str, url: str, page: Page, verbose: bool = True):
         self.source_key = source_key
@@ -448,7 +460,7 @@ class ProfileScraper:
             candidates = self._captured
 
         for cap in candidates:
-            body0 = _set_page_num(cap['post_data'], 0)
+            body0 = _set_page_num(cap['post_data'], 0, self.PAGE_SIZE)
             data = self._call_api(cap['url'], body0)
             if data and _get_records(data):
                 total_elem, total_pages = _get_total_pages(data)
@@ -480,7 +492,7 @@ class ProfileScraper:
         # Trang 0 đã fetch trong _setup
         data0 = self._page0_data
         if data0 is None:
-            body0 = _set_page_num(original_body, 0)
+            body0 = _set_page_num(original_body, 0, self.PAGE_SIZE)
             data0 = self._call_api(api_url, body0)
             if not data0:
                 return
@@ -495,7 +507,7 @@ class ProfileScraper:
         yield recs0
 
         for pn in range(1, total_pages):
-            body_n = _set_page_num(original_body, pn)
+            body_n = _set_page_num(original_body, pn, self.PAGE_SIZE)
             data_n = self._call_api(api_url, body_n)
             if data_n is None:
                 self._log(f"  ✗ Trang {pn + 1} lỗi, dừng")

@@ -173,12 +173,15 @@ def _map_record(source_key: str, raw: dict) -> tuple[dict, dict]:
     for api_field, value in raw.items():
         if api_field == '_record_key':
             continue
-        if api_field in _DATE_ARRAY_FIELDS and isinstance(value, list):
-            value = _arr_to_dt(value)
         db_col = field_map.get(api_field)
         if db_col and db_col in fixed_cols:
+            # Chỉ đổi date-array -> datetime khi vào cột TIMESTAMPTZ cố định.
+            if api_field in _DATE_ARRAY_FIELDS and isinstance(value, list):
+                value = _arr_to_dt(value)
             fixed[db_col] = value
         else:
+            # Vào extra_data (JSONB) -> giữ nguyên giá trị JSON gốc (datetime
+            # không serialize được sang JSONB).
             extra[api_field] = value
 
     # record_key được scraper gán vào _record_key, map sang cột PK của bảng
