@@ -30,6 +30,8 @@ def main():
         help=f"Crawl chỉ một nguồn: {', '.join(C.SOURCES)}",
     )
     ap.add_argument("--headed", action="store_true", help="Hiện cửa sổ trình duyệt")
+    ap.add_argument("--full", action="store_true",
+                    help="Quét HẾT mọi trang (tắt dừng sớm) — lấy đầy đủ về DB, chạy lâu")
     ap.add_argument("--quiet", action="store_true", help="Ít log hơn")
     ap.add_argument("--list-sources", action="store_true", help="Liệt kê các nguồn rồi thoát")
     args = ap.parse_args()
@@ -48,10 +50,11 @@ def main():
     from crawler.crawl import crawl_all, crawl_source
 
     if args.source:
-        r = crawl_source(args.source, headless=headless, verbose=verbose)
+        r = crawl_source(args.source, headless=headless, verbose=verbose,
+                         full=args.full)
         rc = 0 if r["status"] == "done" else 1
     else:
-        results = crawl_all(headless=headless, verbose=verbose)
+        results = crawl_all(headless=headless, verbose=verbose, full=args.full)
         errors = [r for r in results if r["status"] != "done"]
         print(f"\n{'='*60}")
         print(f"Tổng: {len(results)} nguồn, {len(errors)} lỗi")

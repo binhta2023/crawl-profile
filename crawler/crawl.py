@@ -24,8 +24,11 @@ from .seeder import seed_provinces, seed_districts
 
 
 def _crawl_incremental(source_key: str, scraper: ProfileScraper,
-                       db: ProfileDB, verbose: bool) -> dict:
-    """Crawl 1 nguồn với thuật toán incremental. Trả về stats dict."""
+                       db: ProfileDB, verbose: bool, full: bool = False) -> dict:
+    """Crawl 1 nguồn. full=True: quét HẾT mọi trang (tắt dừng sớm) để backfill.
+
+    Trả về stats dict.
+    """
     stats = {"n_total": 0, "n_new": 0, "n_updated": 0,
              "n_unchanged": 0, "stopped_early": False}
 
@@ -47,8 +50,8 @@ def _crawl_incremental(source_key: str, scraper: ProfileScraper,
                   f"{n_unchanged} không đổi / {page_total} records",
                   flush=True)
 
-        # Dừng sớm: toàn trang không có gì mới
-        if n_new == 0 and n_updated == 0 and n_unchanged == page_total:
+        # Dừng sớm: toàn trang không có gì mới (bỏ qua khi full=True)
+        if not full and n_new == 0 and n_updated == 0 and n_unchanged == page_total:
             if verbose:
                 print(f"  → Dừng sớm: trang vừa rồi toàn records đã có "
                       f"({n_unchanged}/{page_total} unchanged)", flush=True)
@@ -59,7 +62,7 @@ def _crawl_incremental(source_key: str, scraper: ProfileScraper,
 
 
 def _run_source(source_key: str, headless: bool, verbose: bool,
-                db: ProfileDB) -> dict:
+                db: ProfileDB, full: bool = False) -> dict:
     """Crawl 1 nguồn, ghi DB, trả về dict kết quả."""
     info = C.SOURCES[source_key]
     log_id = db.log_start(source_key)
@@ -78,7 +81,7 @@ def _run_source(source_key: str, headless: bool, verbose: bool,
             try:
                 scraper = ProfileScraper(source_key, info["url"],
                                          page, verbose=verbose)
-                stats = _crawl_incremental(source_key, scraper, db, verbose)
+                stats = _crawl_incremental(source_key, scraper, db, verbose, full)
                 # Seed districts từ cat-areas data bắt được lúc load trang
                 seed_districts(scraper.cat_areas_data, db, verbose=verbose)
                 result.update(stats)
@@ -113,20 +116,20 @@ def _run_source(source_key: str, headless: bool, verbose: bool,
 
 
 def crawl_source(source_key: str, headless: bool = True,
-                 verbose: bool = True) -> dict:
+                 verbose: bool = True, full: bool = False) -> dict:
     if source_key not in C.SOURCES:
         raise ValueError(f"Nguồn không hợp lệ: {source_key!r}. "
                          f"Chọn: {list(C.SOURCES)}")
     C.ensure_dirs()
     with ProfileDB() as db:
         seed_provinces(db, verbose=verbose)
-        return _run_source(source_key, headless, verbose, db)
+        return _run_source(source_key, headless, verbose, db, full)
 
 
 def crawl_all(headless: bool = True, verbose: bool = True,
               sources: list[str] | None = None,
-              progress_cb=None) -> list[dict]:
-    """Crawl tất cả nguồn tuần tự với incremental stop.
+              progress_cb=None, full: bool = False) -> list[dict]:
+    """Crawl tất cả nguồn tuần tự. full=True: quét hết mọi trang (backfill toàn bộ).
 
     progress_cb(source_key, result): callback sau mỗi nguồn (dùng cho GUI).
     """
@@ -138,8 +141,9 @@ def crawl_all(headless: bool = True, verbose: bool = True,
         for key in keys:
             if verbose:
                 name = C.SOURCES[key]["name"]
-                print(f"\n{'='*60}\n== Crawl: {name}\n{'='*60}", flush=True)
-            r = _run_source(key, headless, verbose, db)
+                mode = " [FULL]" if full else ""
+                print(f"\n{'='*60}\n== Crawl: {name}{mode}\n{'='*60}", flush=True)
+            r = _run_source(key, headless, verbose, db, full)
             results.append(r)
             if progress_cb:
                 try:
