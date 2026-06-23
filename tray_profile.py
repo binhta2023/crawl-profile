@@ -133,6 +133,15 @@ def _sched_interval() -> timedelta:
     return timedelta(hours=_SCHED_INTERVAL_HOURS)
 
 
+def _load_delay() -> float:
+    """Đọc delay/request đã lưu (giây) để hiển thị lên GUI."""
+    try:
+        from crawler import config as C
+        return C.get_request_delay()
+    except Exception:
+        return 1.0
+
+
 # ── App chính ─────────────────────────────────────────────────────────────────
 
 class App:
@@ -204,6 +213,19 @@ class App:
         except Exception:
             pass
 
+        # ── Cấu hình crawl ───────────────────────────────────────────────────
+        cfg_frame = ttk.LabelFrame(self.root, text="Cấu hình", padding=6)
+        cfg_frame.pack(fill="x", padx=10, pady=(0, 6))
+        ttk.Label(cfg_frame,
+                  text="Delay mỗi request tới muasamcong (giây):").pack(side="left")
+        self.v_delay = tk.StringVar(value=str(_load_delay()))
+        ttk.Spinbox(cfg_frame, from_=0.0, to=10.0, increment=0.5, width=6,
+                    textvariable=self.v_delay).pack(side="left", padx=(6, 12))
+        ttk.Button(cfg_frame, text="💾  Lưu cấu hình",
+                   command=self._save_config).pack(side="left")
+        self.lbl_cfg = ttk.Label(cfg_frame, text="", foreground="gray")
+        self.lbl_cfg.pack(side="left", padx=10)
+
         # ── Thanh trạng thái dưới ────────────────────────────────────────────
         status_bar = ttk.Frame(self.root, padding=(10, 0))
         status_bar.pack(fill="x")
@@ -260,6 +282,29 @@ class App:
     def _toggle_startup(self):
         _set_startup(self.v_startup.get())
 
+    # ── Lưu cấu hình ──────────────────────────────────────────────────────────
+
+    def _save_config(self):
+        from crawler import config as C
+        try:
+            d = float(self.v_delay.get())
+            if d < 0:
+                raise ValueError
+        except ValueError:
+            messagebox.showerror("Cấu hình không hợp lệ",
+                                 "Delay phải là số ≥ 0 (giây). Ví dụ: 1.0")
+            return
+        cfg = C.load_app_config()
+        cfg["request_delay"] = d
+        try:
+            C.save_app_config(cfg)
+            self.v_delay.set(str(d))
+            self.lbl_cfg.config(text=f"✓ Đã lưu (delay = {d}s)", foreground="green")
+            self._append(f"[Cấu hình] Đã lưu delay = {d}s "
+                         f"(áp dụng cho lần crawl tiếp theo)\n")
+        except Exception as e:
+            messagebox.showerror("Lỗi lưu cấu hình", str(e))
+
     # ── Chạy / dừng ──────────────────────────────────────────────────────────
 
     def run_now(self):
@@ -269,6 +314,11 @@ class App:
         env = dict(os.environ)
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUNBUFFERED"] = "1"
+        # Truyền delay hiện trên GUI để có hiệu lực ngay (kể cả chưa bấm Lưu)
+        try:
+            env["PROFILE_REQUEST_DELAY"] = str(float(self.v_delay.get()))
+        except (ValueError, AttributeError):
+            pass
         flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
         cmd = [PYEXE, "-u", RUN]
         self._append(f"\n>>> {' '.join(cmd)}\n\n")

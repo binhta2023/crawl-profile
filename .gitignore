@@ -35,3 +35,4 @@ research_output.txt
 # Cấu hình cục bộ
 .claude/settings.local.json
 .claude/projects/
+app_config.json

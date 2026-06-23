@@ -1,6 +1,7 @@
 """Cấu hình crawler Profile muasamcong — kết nối DB, danh sách nguồn."""
 from __future__ import annotations
 
+import json
 import os
 import sys
 import threading
@@ -62,10 +63,47 @@ USER_AGENT = (
 )
 
 NAV_TIMEOUT_MS = 90_000
-REQUEST_DELAY  = 0.5     # giây nghỉ giữa các trang
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.environ.get("PROFILE_DATA_DIR", BASE_DIR / "data"))
+
+# ── Cấu hình ứng dụng (lưu/đọc từ app_config.json) ───────────────────────────
+APP_CONFIG_FILE = BASE_DIR / "app_config.json"
+DEFAULT_REQUEST_DELAY = 1.0   # giây nghỉ giữa mỗi request tới muasamcong
+
+
+def load_app_config() -> dict:
+    """Đọc cấu hình người dùng đã lưu (rỗng nếu chưa có / lỗi)."""
+    try:
+        if APP_CONFIG_FILE.exists():
+            d = json.loads(APP_CONFIG_FILE.read_text(encoding="utf-8"))
+            if isinstance(d, dict):
+                return d
+    except Exception:
+        pass
+    return {}
+
+
+def save_app_config(cfg: dict) -> None:
+    """Ghi cấu hình người dùng ra app_config.json."""
+    APP_CONFIG_FILE.write_text(
+        json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def get_request_delay() -> float:
+    """Delay/request: ưu tiên biến môi trường, rồi file cấu hình, rồi mặc định."""
+    val = os.environ.get("PROFILE_REQUEST_DELAY")
+    if val is None:
+        val = load_app_config().get("request_delay")
+    try:
+        d = float(val)
+        return d if d >= 0 else DEFAULT_REQUEST_DELAY
+    except (TypeError, ValueError):
+        return DEFAULT_REQUEST_DELAY
+
+
+# Giá trị dùng lúc import (mỗi lần crawl là tiến trình mới nên luôn đọc giá trị mới nhất)
+REQUEST_DELAY = get_request_delay()
 
 # --- Bí mật / kết nối ---
 # Tìm file secrets: trong thư mục project trước, rồi thư mục cha (C:\Bidpro)
